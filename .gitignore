@@ -1,0 +1,35 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Optional: build hoặc dist nếu dùng TypeScript hoặc bundler
+dist/
+build/
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# IDE config
+.vscode/
+.idea/
+
+# PM2 logs
+pids/
+*.pid
+*.seed
+
+# MongoDB dump files
+dump/
