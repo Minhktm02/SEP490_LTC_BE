@@ -37,7 +37,7 @@ exports.bookTour = async (req, res) => {
     }
 
     const availability = tour.availability.find(
-      (a) => a._id.toString() === availabilityId
+        (a) => a._id.toString() === availabilityId
     );
 
     if (!availability) {
