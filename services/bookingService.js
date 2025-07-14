@@ -1,5 +1,16 @@
 const bookingRepository = require('../repositories/bookingRepository');
+const roomRepository = require('../repositories/roomRepository');
 const mongoose = require('mongoose');
+const PayOS = require('@payos/node');
+const User = require('../models/User');
+const Hotel = require('../models/Hotel');
+require('dotenv').config();
+
+const payOS = new PayOS(
+  process.env.PAYOS_CLIENT_ID,
+  process.env.API_Key,
+  process.env.Checksum_Key
+);
 
 const getPendingBookingsService = async (ownerId, filters, page, limit) => {
   try {
@@ -68,9 +79,190 @@ const updateBookingStatusService = async (bookingId, ownerId, status) => {
   }
 };
 
+const createBookingService = async (userId, bookingData) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      hotelId,
+      roomId,
+      checkInDate,
+      checkOutDate,
+      numberOfPeople,
+      promotionCode,
+      buyerName,
+      buyerEmail,
+      buyerPhone,
+      buyerAddress,
+      specialRequests = ''
+    } = bookingData;
+
+    if (!mongoose.Types.ObjectId.isValid(userId) ||
+      !mongoose.Types.ObjectId.isValid(hotelId) ||
+      !mongoose.Types.ObjectId.isValid(roomId)) {
+      throw new Error('ID người dùng, khách sạn hoặc phòng không hợp lệ');
+    }
+
+    if (!buyerName || !buyerEmail || numberOfPeople <= 0) {
+      throw new Error('Thông tin người mua và số người là bắt buộc');
+    }
+
+    const checkIn = new Date(checkInDate);
+    const checkOut = new Date(checkOutDate);
+    if (isNaN(checkIn) || isNaN(checkOut) || checkIn >= checkOut) {
+      throw new Error('Ngày check-in/check-out không hợp lệ');
+    }
+
+    const room = await roomRepository.findAvailableRoom(
+      roomId,
+      checkInDate,
+      checkOutDate,
+      numberOfPeople,
+      session
+    );
+    if (!room) throw new Error('Phòng không khả dụng hoặc không tồn tại');
+
+    const hotel = await Hotel.findOne({ _id: hotelId, status: 'active' }).session(session);
+    if (!hotel) throw new Error('Khách sạn không tồn tại hoặc không hoạt động');
+
+    let totalPrice = room.price * numberOfPeople;
+    let discount = 0;
+
+    if (promotionCode) {
+      const promotion = await Promotion.findOne({
+        code: promotionCode,
+        type: 'hotel',
+        hotelId,
+        startDate: { $lte: new Date() },
+        endDate: { $gte: new Date() },
+        usedCount: { $lt: '$maxUses' }
+      }).session(session);
+
+      if (!promotion) throw new Error('Mã khuyến mãi không hợp lệ hoặc đã hết hạn');
+
+      discount = promotion.discountAmount || (totalPrice * (promotion.discountPercentage / 100));
+      totalPrice = Math.max(0, totalPrice - discount);
+
+      promotion.usedCount += 1;
+      await promotion.save({ session });
+    }
+
+    const owner = await User.findById(hotel.ownerId).session(session);
+    if (!owner) throw new Error('Chủ khách sạn không tồn tại');
+
+    const commissionRate = owner.businessInfo?.commissionRate || 0.1;
+    const commissionAmount = totalPrice * commissionRate;
+    const netPayoutAmount = totalPrice - commissionAmount;
+
+    const bookingCode = `BOOK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    const bookingPayload = {
+      userId,
+      type: 'hotel',
+      hotelId,
+      roomId,
+      details: {
+        checkInDate: checkIn,
+        checkOutDate: checkOut,
+        numberOfPeople,
+        roomType: room.roomType,
+        specialRequests
+      },
+      totalPrice,
+      commissionAmount,
+      netPayoutAmount,
+      status: 'pending',
+      paymentInfo: {
+        bookingCode,
+        paymentMethod: 'payos',
+        payoutStatus: 'pending'
+      }
+    };
+
+    console.log('📝 Booking payload:', bookingPayload);
+
+    const createdBookings = await bookingRepository.createBooking(bookingPayload, session);
+    if (!Array.isArray(createdBookings) || createdBookings.length === 0) {
+      throw new Error('Tạo booking thất bại');
+    }
+    const createdBooking = createdBookings[0];
+
+    await bookingRepository.createPayment(
+      {
+        amount: totalPrice,
+        bookingId: createdBooking._id,
+        status: 'pending'
+      },
+      session
+    );
+
+    await bookingRepository.updateRoomAvailability(roomId, checkInDate, checkOutDate, numberOfPeople, session);
+
+    if (!room.roomType || typeof room.price !== 'number') {
+      throw new Error('Dữ liệu phòng thiếu roomType hoặc price');
+    }
+    const rawDescription = `Phòng ${room.roomType} tại ${hotel.name}`;
+    const description = rawDescription.length > 25 ? rawDescription.slice(0, 25) : rawDescription;
+    const paymentData = {
+      orderCode: parseInt(bookingCode.replace('BOOK', '')),
+      amount: totalPrice,
+      description,
+      items: [
+        {
+          name: room.roomType,
+          quantity: numberOfPeople,
+          price: room.price
+        }
+      ],
+      cancelUrl: process.env.CANCEL_URL || 'https://localhost:3000/cancel',
+      returnUrl: process.env.RETURN_URL || 'https://localhost:3000/success',
+      buyerName,
+      buyerEmail,
+      buyerPhone,
+      buyerAddress,
+      expiredAt: Math.floor(Date.now() / 1000) + 15 * 60
+    };
+
+    // console.log('📦 Gửi PayOS:', paymentData);
+
+    if (!room?.roomType || typeof room.price !== 'number' || typeof numberOfPeople !== 'number') {
+      throw new Error('❌ Dữ liệu phòng không hợp lệ: thiếu roomType, price hoặc numberOfPeople');
+    }
+    console.log('📦 Dữ liệu gửi PayOS:', {
+      roomType: room.roomType,
+      roomPrice: room.price,
+      numberOfPeople,
+    });
+
+    const paymentLinkData = await payOS.createPaymentLink(paymentData);
+
+    createdBooking.paymentLink = paymentLinkData.checkoutUrl;
+    await createdBooking.save({ session });
+
+    await session.commitTransaction();
+
+    return {
+      success: true,
+      message: 'Tạo booking thành công',
+      data: {
+        bookingId: createdBooking._id.toString(),
+        paymentLink: paymentLinkData.checkoutUrl,
+        expiresAt: paymentData.expiredAt
+      }
+    };
+  } catch (err) {
+    await session.abortTransaction();
+    console.error('❌ Lỗi trong createBookingService:', err);
+    throw new Error(`Lỗi dịch vụ khi tạo booking: ${err.message}`);
+  } finally {
+    session.endSession();
+  }
+};
 module.exports = {
   getPendingBookingsService,
   getBookingsByOwnerHotelsService,
   getBookingDetailsService,
-  updateBookingStatusService
+  updateBookingStatusService,
+  createBookingService
 };

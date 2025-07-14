@@ -123,6 +123,36 @@ const updateRoomPrice = async (hotelId, roomId, ownerId, price) => {
   }
 };
 
+const findAvailableRoom = async (roomId, checkInDate, checkOutDate, numberOfPeople, session) => {
+  return await Room.findOne({
+    _id: roomId,
+    status: 'active',
+    'availability.date': {
+      $gte: new Date(checkInDate),
+      $lte: new Date(checkOutDate),
+    },
+    'availability.quantity': { $gte: numberOfPeople },
+    maxPeople: { $gte: numberOfPeople },
+  }).session(session);
+};
+
+const restoreAvailability = async (roomId, checkInDate, checkOutDate, numberOfPeople, session) => {
+  return await Room.updateOne(
+    {
+      _id: roomId,
+      'availability.date': {
+        $gte: new Date(checkInDate),
+        $lte: new Date(checkOutDate),
+      },
+    },
+    {
+      $inc: {
+        'availability.$.quantity': numberOfPeople,
+      },
+    },
+    { session }
+  );
+};
 module.exports = {
   createRoom,
   updateRoom,
@@ -130,5 +160,7 @@ module.exports = {
   findRoomById,
   deleteRoom,
   updateRoomAvailability,
-  updateRoomPrice
+  updateRoomPrice,
+  findAvailableRoom,
+  restoreAvailability
 };

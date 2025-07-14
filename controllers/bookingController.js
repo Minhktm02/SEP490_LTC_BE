@@ -63,10 +63,29 @@ const updateBookingStatus = async (req, res) => {
     });
   }
 };
+const createBooking = async (req, res) => {
+  try {
+    const userId = req.user._id?.toString?.(); // ✅ FIXED
+    console.log('Dữ liệu body nhận được:', req.body);
+
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({ success: false, message: 'Body request không được gửi hoặc rỗng' });
+    }
+
+    const bookingData = req.body;
+    const result = await bookingService.createBookingService(userId, bookingData);
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Lỗi trong createBooking:', error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 
 module.exports = {
   getPendingBookings,
   getBookingsByOwnerHotels,
   getBookingDetails,
-  updateBookingStatus
+  updateBookingStatus,
+  createBooking
 };

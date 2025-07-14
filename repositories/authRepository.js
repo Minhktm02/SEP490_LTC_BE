@@ -2,8 +2,10 @@ const User = require('../models/User');
 const LoyaltyPoints = require('../models/LoyaltyPoints');
 
 const findUserById = async (userId) => {
+  if (!isValidObjectId(userId)) throw new Error('Invalid user ID');
   return await User.findById(userId).select('email phone name profile role status isEmailVerified businessInfo');
 };
+
 
 const findLoyaltyPointsByUserId = async (userId) => {
   return await LoyaltyPoints.findOne({ userId }).select('points history');

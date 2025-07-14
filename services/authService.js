@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const { findUserByEmail, updatePassword, findUserById, findLoyaltyPointsByUserId, updateUserProfile } = require('../repositories/authRepository');
 const { sendOTPEmail } = require('./otpMailService');
 const cloudinary = require('../config/cloudinary');
@@ -200,54 +201,68 @@ const getProfile = async (userId) => {
 };
 
 const updateProfile = async (userId, updates, files) => {
-  const profileUpdates = {};
-  if (updates.name) profileUpdates.name = updates.name;
-  if (updates.address) profileUpdates['profile.address'] = updates.address;
-  if (updates.dateOfBirth) profileUpdates['profile.dateOfBirth'] = updates.dateOfBirth;
-
-  if (files && files.length > 0) {
-    const file = files[0];
-
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            folder: 'SEP490/avatars',
-            resource_type: 'image',
-          },
-          (error, result) => {
-            if (error) {
-              console.error('Cloudinary upload error:', error);
-              reject(error);
-            } else {
-              resolve(result);
-            }
-          }
-        );
-        stream.end(file.buffer);
-      });
-
-      profileUpdates['profile.avatar'] = result.secure_url;
-    } catch (error) {
-      console.error('Upload error details:', error);
-      throw { status: 500, message: 'Lỗi khi upload ảnh lên Cloudinary' };
+  try {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw { status: 400, message: 'ID người dùng không hợp lệ' };
     }
-  }
-  profileUpdates['profile.updatedAt'] = new Date();
-  const updatedUser = await updateUserProfile(userId, profileUpdates);
-  if (!updatedUser) {
-    throw { status: 404, message: 'Người dùng không tồn tại' };
-  }
-  return {
-    email: updatedUser.email,
-    phone: updatedUser.phone,
-    name: updatedUser.name,
-    address: updatedUser.profile.address,
-    dateOfBirth: updatedUser.profile.dateOfBirth,
-    avatar: updatedUser.profile.avatar,
-  };
-};
+    const profileUpdates = {};
+    if (updates.name) profileUpdates.name = updates.name;
+    if (updates.address) profileUpdates['profile.address'] = updates.address;
+    if (updates.dateOfBirth) profileUpdates['profile.dateOfBirth'] = updates.dateOfBirth;
 
+    if (files && files.length > 0) {
+      const file = files[0];
+      try {
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: 'SEP490/avatars',
+              resource_type: 'image',
+            },
+            (error, result) => {
+              if (error) {
+                console.error('Lỗi tải lên Cloudinary:', error);
+                reject(error);
+              } else {
+                resolve(result);
+              }
+            }
+          );
+          stream.end(file.buffer);
+        });
+        profileUpdates['profile.avatar'] = result.secure_url;
+      } catch (error) {
+        console.error('Chi tiết lỗi tải lên Cloudinary:', error);
+        throw { status: 500, message: 'Lỗi khi tải ảnh lên Cloudinary' };
+      }
+    }
+    profileUpdates['profile.updatedAt'] = new Date();
+
+    const userExists = await User.findById(userId).lean();
+    if (!userExists) {
+      throw { status: 404, message: 'Người dùng không tồn tại trong cơ sở dữ liệu' };
+    }
+
+    const updatedUser = await updateUserProfile(userId, profileUpdates);
+    if (!updatedUser) {
+      throw { status: 404, message: 'Không thể cập nhật hồ sơ, người dùng không tồn tại' };
+    }
+    if (!updatedUser.email || !updatedUser.profile) {
+      throw { status: 500, message: 'Dữ liệu người dùng không đầy đủ sau khi cập nhật' };
+    }
+    return {
+      email: updatedUser.email,
+      phone: updatedUser.phone,
+      name: updatedUser.name,
+      address: updatedUser.profile.address,
+      dateOfBirth: updatedUser.profile.dateOfBirth,
+      avatar: updatedUser.profile.avatar,
+    };
+  } catch (error) {
+    console.error('Lỗi trong updateProfile:', error);
+    throw error.status ? error : { status: 500, message: `Lỗi hệ thống khi cập nhật hồ sơ: ${error.message}` };
+  }
+};
 module.exports = {
   register,
   verifyOtp,

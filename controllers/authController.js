@@ -124,9 +124,11 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const userId = req.user._id;
-    const updates = req.body;
-    const files = req.files;
+    const updates = req.body || {};
+    const files = req.files || [];
+    
     const updatedProfile = await authService.updateProfile(userId, updates, files);
+
     return res.status(200).json({
       success: true,
       message: 'Cập nhật thông tin cá nhân thành công',
