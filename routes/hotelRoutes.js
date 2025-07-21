@@ -13,12 +13,12 @@ const upload = require('../utils/upload');
 
 // PUBLIC ROUTES
 router.get('/search/hotels', hotelController.searchHotelsHandler);
-router.get('/:hotelId', hotelController.getHotelDetails);
+router.get('/details/:hotelId', hotelController.getHotelDetails);
 router.get('/:hotelId/rooms/:roomId', roomController.getRoomDetails);
-
+router.get ('/All', hotelController.getAllHotels);
 
 // HOTEL OWNER ROUTES
-router.post('/', authMiddleware, roleMiddleware(['hotel_owner']), upload.array('images', 5), hotelController.createHotel);
+router.post('/create', authMiddleware, roleMiddleware(['hotel_owner']), upload.array('images', 5), hotelController.createHotel);
 router.get('/my', authMiddleware, roleMiddleware(['hotel_owner']), hotelController.getHotels);
 router.get('/:id', authMiddleware, roleMiddleware(['hotel_owner']), hotelController.getHotel);
 router.put('/:id', authMiddleware, roleMiddleware(['hotel_owner']), upload.array('images', 5), hotelController.updateHotel);

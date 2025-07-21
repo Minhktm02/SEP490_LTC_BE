@@ -12,6 +12,7 @@ const BookingSchema = new Schema({
       return this.type === 'hotel';
     }
   },
+
   tourId: {
     type: Schema.Types.ObjectId,
     ref: 'Tour',

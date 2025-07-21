@@ -24,13 +24,6 @@ const findReviewsByHotelId = async (hotelId, page = 1, limit = 10) => {
   }
 };
 
-const findByHotelId = async (hotelId) => {
-  return await Review.find({ hotelId })
-    .select('userId comment createdAt')
-    .lean();
-};
-
 module.exports = {
-  findReviewsByHotelId,
-  findByHotelId
+  findReviewsByHotelId
 };

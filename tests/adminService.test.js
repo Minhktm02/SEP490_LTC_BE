@@ -17,7 +17,7 @@ describe('Admin Service', () => {
 
   test('getPendingBusinessUsersService - success', async () => {
     const mockUsers = [{ email: 'test@example.com' }];
-    UserRepository.findPendingBusinessUsers.mockResolvedValue(mockUsers); //Đảm bảo service lấy đúng danh sách người dùng đang chờ.
+    UserRepository.findPendingBusinessUsers.mockResolvedValue(mockUsers);
 
     const result = await getPendingBusinessUsersService();
 
@@ -33,7 +33,7 @@ describe('Admin Service', () => {
       status: 'pending',
     };
 
-    UserRepository.findUserById.mockResolvedValue(mockUser); //Đảm bảo service cập nhật trạng thái đúng khi duyệt tài khoản.
+    UserRepository.findUserById.mockResolvedValue(mockUser);
     UserRepository.updateUser.mockResolvedValue();
 
     const result = await verifyBusinessUserService({

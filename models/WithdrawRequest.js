@@ -5,14 +5,17 @@ const WithdrawRequestSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   walletId: { type: Schema.Types.ObjectId, ref: 'Wallet', required: true },
   amount: { type: Number, required: true },
+
   status: {
     type: String,
     enum: ['pending', 'processing', 'completed', 'rejected'],
     default: 'pending'
   },
+
   requestedAt: { type: Date, default: Date.now },
   processedAt: { type: Date },
   note: { type: String },
+
   bankSnapshot: {
     accountNumber: String,
     bankName: String,
