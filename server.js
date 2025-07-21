@@ -12,7 +12,10 @@ const hotelRoutes = require('./routes/hotelRoutes');
 const transactionRoutes = require('./routes/businessUserRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const tourRoutes = require('./routes/tourRoutes');
+
 const app = express();
+
 // Middleware
 app.use(express.json());
 app.use(morgan("dev")); 
@@ -41,6 +44,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/business-user', BusinessUserRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/hotel', hotelRoutes);
+app.use('/api/tours', tourRoutes); 
 app.use('/api/transaction', transactionRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/payment', paymentRoutes);
@@ -49,18 +53,6 @@ app.get('/', (req, res) => {
     res.status(200).json({
         message: "oke"
     });
-});
-// Payment
-app.use('/api/payments', paymentRoutes);
-app.get('/payment-result', (req, res) => {
-    const status = req.query.status;
-    res.send(`
-        <html>
-        <body>
-            <h2>Thanh toán ${status === 'success' ? 'THÀNH CÔNG ' : 'THẤT BẠI '}</h2>
-        </body>
-        </html>
-    `);
 });
 
 // Middleware xử lý 404 Not Found
@@ -90,4 +82,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
-

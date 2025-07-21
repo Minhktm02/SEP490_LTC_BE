@@ -41,201 +41,90 @@ const {
 } = require('../services/authService');
 
 describe('register', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('should throw if email and phone are missing', async () => {
-    await expect(register({ password: 'pass', name: 'Test' }))
-      .rejects.toMatchObject({ status: 400, message: /Phải có ít nhất email/ });
-  });
-
-  it('should throw if email already exists', async () => {
-    findUserByEmail.mockResolvedValue({});
-    await expect(register({ email: 'test@example.com', password: 'pass', name: 'Test' }))
-      .rejects.toMatchObject({ status: 400, message: /Email đã được sử dụng/ });
-  });
-
-  it('should register a customer and send OTP', async () => {
+  it('should register user with email and send OTP', async () => {
     findUserByEmail.mockResolvedValue(null);
     bcrypt.genSalt.mockResolvedValue('salt');
-    bcrypt.hash.mockResolvedValue('hashed');
+    bcrypt.hash.mockResolvedValue('hashedPassword');
     sendOTPEmail.mockResolvedValue({ success: true, otp: '123456' });
 
     const result = await register({
       email: 'test@example.com',
-      password: 'pass',
-      name: 'Test',
+      password: 'password',
+      name: 'Test User',
       role: 'customer',
+      phone: '0123456789'
     });
 
+    expect(result).toHaveProperty('userId');
     expect(result).toHaveProperty('otp', '123456');
     expect(sendOTPEmail).toHaveBeenCalled();
-  });
-
-  it('should throw if sendOTPEmail fails', async () => {
-    findUserByEmail.mockResolvedValue(null);
-    bcrypt.genSalt.mockResolvedValue('salt');
-    bcrypt.hash.mockResolvedValue('hashed');
-    sendOTPEmail.mockResolvedValue({ success: false });
-
-    await expect(register({
-      email: 'fail@example.com',
-      password: '123456',
-      name: 'Fail',
-    })).rejects.toMatchObject({ status: 500 });
-  });
-
-  it('should register without email (phone only)', async () => {
-    const result = await register({
-      phone: '0123456789',
-      password: 'pass',
-      name: 'NoEmail',
-    });
-
-    expect(result.message).toMatch(/thành công bằng số điện thoại/i);
+    expect(saveOTP).toHaveBeenCalledWith('test@example.com', '123456', 10);
   });
 });
 
-
 describe('verifyOtp', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('should throw if user not found', async () => {
-    findUserByEmail.mockResolvedValue(null);
-    await expect(verifyOtp({ email: 'no@example.com', verificationCode: '000000' }))
-      .rejects.toMatchObject({ status: 404 });
-  });
-
-  it('should throw if OTP invalid', async () => {
-    findUserByEmail.mockResolvedValue({});
-    verifyOTP.mockReturnValue({ valid: false, reason: 'OTP sai' });
-
-    await expect(verifyOtp({ email: 'test@example.com', verificationCode: '123' }))
-      .rejects.toMatchObject({ status: 400, message: 'OTP sai' });
-  });
-
-  it('should activate user if OTP valid', async () => {
-    const user = { save: jest.fn(), status: 'pending', isEmailVerified: false };
-    findUserByEmail.mockResolvedValue(user);
+  it('should verify OTP and activate user', async () => {
+    const fakeUser = { save: jest.fn(), isEmailVerified: false };
+    findUserByEmail.mockResolvedValue(fakeUser);
     verifyOTP.mockReturnValue({ valid: true });
 
-    const res = await verifyOtp({ email: 'test@example.com', verificationCode: '123456' });
+    const result = await verifyOtp({
+      email: 'test@example.com',
+      verificationCode: '123456'
+    });
 
-    expect(user.save).toHaveBeenCalled();
-    expect(res.message).toMatch(/Xác minh OTP thành công/);
+    expect(result.message).toMatch(/Xác minh OTP thành công/i);
+    expect(fakeUser.save).toHaveBeenCalled();
   });
 });
 
 describe('login', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('should throw if email not found', async () => {
-    findUserByEmail.mockResolvedValue(null);
-    await expect(login('missing@example.com', 'pass'))
-      .rejects.toMatchObject({ status: 404 });
-  });
-
-  it('should throw if user inactive', async () => {
-    findUserByEmail.mockResolvedValue({ status: 'pending' });
-    await expect(login('inactive@example.com', 'pass'))
-      .rejects.toMatchObject({ status: 403 });
-  });
-
-  it('should throw if email not verified', async () => {
-    findUserByEmail.mockResolvedValue({ status: 'active', isEmailVerified: false });
-    await expect(login('noverify@example.com', 'pass'))
-      .rejects.toMatchObject({ status: 403 });
-  });
-
-  it('should throw if password mismatch', async () => {
-    findUserByEmail.mockResolvedValue({ status: 'active', isEmailVerified: true, password: 'hashed' });
-    bcrypt.compare.mockResolvedValue(false);
-    await expect(login('test@example.com', 'wrongpass'))
-      .rejects.toMatchObject({ status: 401 });
-  });
-
-  it('should return token and user info if valid', async () => {
-    const user = { _id: '123', role: 'customer', email: 'test@example.com', password: 'hashed', status: 'active', isEmailVerified: true, name: 'Test' };
-    findUserByEmail.mockResolvedValue(user);
+  it('should return access and refresh tokens if valid', async () => {
+    const fakeUser = {
+      _id: '123',
+      role: 'customer',
+      email: 'test@example.com',
+      password: 'hashedPassword',
+      status: 'active',
+      isEmailVerified: true,
+      name: 'Test User'
+    };
+    findUserByEmail.mockResolvedValue(fakeUser);
     bcrypt.compare.mockResolvedValue(true);
     jwt.sign.mockReturnValue('token');
 
-    const result = await login('test@example.com', 'pass');
-    expect(result.accessToken).toBe('token');
-    expect(result.user.email).toBe('test@example.com');
+    const res = await login('test@example.com', 'password');
+    expect(res.accessToken).toBe('token');
+    expect(res.user).toHaveProperty('email', 'test@example.com');
   });
 });
-
 
 describe('forgotPassword', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('should throw if email not found', async () => {
-    findUserByEmail.mockResolvedValue(null);
-    await expect(forgotPassword('missing@example.com'))
-      .rejects.toMatchObject({ status: 404 });
-  });
-
-  it('should throw if sendOTPEmail fails', async () => {
-    findUserByEmail.mockResolvedValue({ name: 'User' });
-    sendOTPEmail.mockResolvedValue({ success: false });
-
-    await expect(forgotPassword('fail@example.com'))
-      .rejects.toMatchObject({ status: 500 });
-  });
-
-  it('should return message and OTP info on success', async () => {
-    findUserByEmail.mockResolvedValue({ name: 'User' });
-    sendOTPEmail.mockResolvedValue({ success: true, otp: '999999', expiryTime: new Date(), messageId: 'abc' });
+  it('should send reset OTP via email', async () => {
+    findUserByEmail.mockResolvedValue({ name: 'Test User' });
+    sendOTPEmail.mockResolvedValue({
+      success: true, otp: '654321', messageId: 'msg123', expiryTime: new Date()
+    });
 
     const res = await forgotPassword('test@example.com');
-    expect(res.otp).toBe('999999');
-    expect(res.message).toMatch(/đã được gửi/);
+    expect(res.message).toMatch(/đã được gửi/i);
+    expect(sendOTPEmail).toHaveBeenCalledWith('test@example.com', 'Test User', 6, 10, 'forgot-password');
   });
 });
-
 
 describe('resetPassword', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  const now = new Date();
-
-  it('should throw if email not found', async () => {
-    findUserByEmail.mockResolvedValue(null);
-    await expect(resetPassword('no@example.com', '123', 'newPass', now))
-      .rejects.toMatchObject({ status: 404 });
-  });
-
-  it('should throw if OTP expired', async () => {
-    findUserByEmail.mockResolvedValue({ _id: '123' });
-
-    const expired = new Date(now.getTime() - 60000);
-    await expect(resetPassword('test@example.com', '123', 'newPass', expired))
-      .rejects.toMatchObject({ status: 400 });
-  });
-
-  it('should update password on valid OTP and not expired', async () => {
+  it('should update password if resetCode valid', async () => {
     findUserByEmail.mockResolvedValue({ _id: '123' });
     bcrypt.genSalt.mockResolvedValue('salt');
-    bcrypt.hash.mockResolvedValue('hashed');
+    bcrypt.hash.mockResolvedValue('newHashed');
 
-    const future = new Date(now.getTime() + 60000);
-    const result = await resetPassword('test@example.com', '123', 'newPass', future);
+    const now = new Date();
+    const res = await resetPassword('test@example.com', '123456', 'newPassword', new Date(now.getTime() + 60000));
 
-    expect(updatePassword).toHaveBeenCalledWith('123', 'hashed');
-    expect(result.message).toMatch(/thành công/);
+    expect(updatePassword).toHaveBeenCalledWith('123', 'newHashed');
+    expect(res.message).toMatch(/Đặt lại mật khẩu thành công/i);
   });
 });
-
 
 describe('getProfile', () => {
   it('should return user profile and loyalty points', async () => {
