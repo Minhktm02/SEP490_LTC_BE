@@ -86,3 +86,19 @@ exports.refundBooking = async (bookingId, userId) => {
 
   return transaction;
 };
+//Admin search
+exports.searchBookings = async (query) => {
+  const { status, tourId, customerId, paymentStatus } = query;
+  const filter = {};
+  if (status) filter.status = status;
+  if (tourId) filter.tourId = tourId;
+  if (customerId) filter.customerId = customerId;
+  if (paymentStatus) filter['payment.status'] = paymentStatus;
+
+  return await tourRepo.search(filter);
+};
+
+//User view their own bookings
+exports.getMyBookings = async (userId) => {
+  return await tourRepo.findByCustomer(userId);
+};

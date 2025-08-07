@@ -17,7 +17,14 @@ exports.getAllTours = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
+exports.searchTours = async (req, res) => {
+  try {
+    const tours = await tourService.searchTours(req.query);
+    res.json(tours);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
 exports.getTourById = async (req, res) => {
   try {
     const tour = await tourService.getTourById(req.params.id);

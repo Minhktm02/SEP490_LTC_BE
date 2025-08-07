@@ -18,3 +18,24 @@ exports.refundBooking = async (req, res) => {
     res.status(400).json({ message: err.message });
   }
 };
+// Admin search
+exports.searchBookings = async (req, res) => {
+  console.log('✅ searchBookings route HIT');
+  try {
+    const bookings = await bookingTourService.searchBookings(req.query);
+    res.status(200).json(bookings);
+  } catch (err) {
+    console.error('Error searching bookings:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// User bookings
+exports.getMyBookings = async (req, res) => {
+  try {
+    const bookings = await bookingTourService.getMyBookings(req.user._id);
+    res.status(200).json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
