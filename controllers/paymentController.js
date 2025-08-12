@@ -4,7 +4,7 @@ const paypal = require('@paypal/checkout-server-sdk');
 const TourBooking = require('../models/TourBooking');
 const Tour = require('../models/Tour');
 const transactionRepo = require('../repositories/transactionRepository');
-
+const BASE_URL = process.env.PUBLIC_URL || 'http://localhost:9999';
 // Handle PayOS webhook (Hotel)
 const handlePayOSWebhook = async (req, res) => {
   try {
@@ -21,85 +21,171 @@ const handlePayOSWebhook = async (req, res) => {
   }
 };
 
-// Tạo đơn PayPal (Tour)
+/**
+ * Tạo đơn PayPal cho Tour
+ * Body: { bookingId, totalPrice }
+ */
 const createPayPalOrder = async (req, res) => {
-  const { totalPrice, bookingId } = req.body;
+  try {
+    const { bookingId, totalPrice } = req.body;
 
-  const request = new paypal.orders.OrdersCreateRequest();
-  request.prefer('return=representation');
-  request.requestBody({
-    intent: 'CAPTURE',
-    purchase_units: [{
-      amount: {
-        currency_code: 'USD',
-        value: (totalPrice / 25000).toFixed(2)
-      }
-    }],
-    application_context: {
-      return_url: `http://localhost:9999/api/payments/payment-success?bookingId=${bookingId}`,
-      cancel_url: `http://localhost:9999/api/payments/payment-cancel`
+    if (!bookingId || !totalPrice) {
+      return res.status(400).json({ error: 'Thiếu bookingId hoặc totalPrice' });
     }
-  });
 
-  try {
-    const order = await paypalClient.execute(request);
-    const approvalUrl = order.result.links.find(link => link.rel === 'approve').href;
-    res.json({ approvalUrl });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Lỗi tạo đơn PayPal' });
-  }
-};
-
-// Capture thanh toán PayPal (Tour)
-const capturePayPalPayment = async (req, res) => {
-  const { token, bookingId } = req.query;
-  const request = new paypal.orders.OrdersCaptureRequest(token);
-
-  try {
-    const capture = await paypalClient.execute(request);
-    const transactionId = capture.result.id;
-
-    // Lấy booking và tour đầy đủ
     const booking = await TourBooking.findById(bookingId);
-    if (!booking) throw new Error('Không tìm thấy booking');
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking không tồn tại' });
+    }
+    if (booking.status !== 'pending') {
+      return res.status(400).json({ error: 'Booking không ở trạng thái pending' });
+    }
+    if (booking.totalPrice !== totalPrice) {
+      return res.status(400).json({ error: 'Số tiền không khớp với booking' });
+    }
 
-    const tour = await Tour.findById(booking.tourId).select('providerId');
-    if (!tour) throw new Error('Không tìm thấy tour');
+    // Chuyển sang USD
+    let usdAmount = (Number(totalPrice) / 25000).toFixed(2);
+    if (usdAmount < 1) {
+      usdAmount = "1.00"; // PayPal yêu cầu >= 1 USD
+    }
 
-    // Cập nhật trạng thái thanh toán
-    booking.status = 'confirmed';
-    booking.payment.status = 'completed';
-    booking.payment.paymentDate = new Date();
-    await booking.save();
-
-    // Tạo Transaction
-    await transactionRepo.create({
-      userId: booking.customerId,
-      type: 'payment',
-      direction: 'in',
-      amount: booking.totalPrice,
-      method: 'paypal',
-      status: 'completed',
-      transactionId,
-      tourBookingId: booking._id,
-      details: {
-        businessUserId: tour.providerId,
-        commission: 0,
-        completedAt: new Date()
+    // Tạo request PayPal
+    const request = new paypal.orders.OrdersCreateRequest();
+    request.prefer('return=representation');
+    request.requestBody({
+      intent: 'CAPTURE', // Cho phép thanh toán ngay
+      purchase_units: [{
+        reference_id: bookingId,
+        amount: {
+          currency_code: 'USD',
+          value: usdAmount
+        }
+      }],
+      application_context: {
+        brand_name: "Your Brand Name",
+        landing_page: "LOGIN",
+        user_action: "PAY_NOW", // Quan trọng: Hiển thị nút Pay Now
+        return_url: `${BASE_URL}/api/payment/success?bookingId=${bookingId}`,
+        cancel_url: `${BASE_URL}/api/payment/cancel?bookingId=${bookingId}`
       }
     });
 
-    res.redirect('/payment-result?status=success');
+    const order = await paypalClient.execute(request);
+    const approvalUrl = order.result.links.find(link => link.rel === 'approve')?.href;
+
+    console.log("✅ PayPal Order Created:", order.result.id);
+    return res.json({ approvalUrl, id: order.result.id });
+
   } catch (err) {
-    console.error('PayPal capture error:', err.message);
-    res.redirect('/payment-result?status=fail');
+    console.error('❌ createPayPalOrder error:', err);
+    return res.status(500).json({ error: 'Lỗi tạo đơn PayPal' });
   }
 };
 
 
+/**
+ * Capture thanh toán PayPal cho Tour
+ */
+const capturePayPalPayment = async (req, res) => {
+  try {
+    const { token, bookingId: bookingIdQuery } = req.query;
+    console.log("=== PAYPAL CALLBACK ===");
+    console.log("Token:", token);
+    console.log("BookingId (query):", bookingIdQuery);
+
+    if (!token) {
+      console.error("❌ Thiếu token (orderId) từ PayPal");
+      return res.redirect(`${BASE_URL}/api/payment/payment-result?status=fail`);
+    }
+
+    // Capture order từ PayPal
+    const request = new paypal.orders.OrdersCaptureRequest(token);
+    request.requestBody({});
+    const capture = await paypalClient.execute(request);
+
+    console.log("📦 Capture Response:", JSON.stringify(capture.result, null, 2));
+
+    const pu = capture.result.purchase_units?.[0];
+    const bookingId = pu?.reference_id || bookingIdQuery;
+    const captureStatus = capture.result.status; // Lấy status từ root luôn
+    const transactionId = pu?.payments?.captures?.[0]?.id;
+
+    console.log("BookingId:", bookingId);
+    console.log("CaptureStatus:", captureStatus);
+    console.log("TransactionId:", transactionId);
+
+    if (!bookingId) {
+      console.error("❌ Không lấy được bookingId");
+      return res.redirect(`${BASE_URL}/api/payment/payment-result?status=fail`);
+    }
+
+    if (captureStatus !== 'COMPLETED') {
+      console.error(`⚠️ Thanh toán chưa COMPLETED (status: ${captureStatus})`);
+      return res.redirect(`${BASE_URL}/api/payment/payment-result?status=fail`);
+    }
+
+    // Update DB
+    const booking = await TourBooking.findById(bookingId);
+    if (!booking) {
+      console.error("❌ Không tìm thấy booking trong DB");
+      return res.redirect(`${BASE_URL}/api/payment/payment-result?status=fail`);
+    }
+
+    const tour = await Tour.findById(booking.tourId).select('providerId');
+
+    if (booking.payment?.status !== 'paid') {
+      booking.status = 'confirmed';
+      booking.payment = {
+        ...(booking.payment || { method: 'paypal' }),
+        status: 'paid',
+        paymentDate: new Date()
+      };
+      await booking.save();
+
+      await transactionRepo.create({
+        userId: booking.customerId,
+        type: 'payment',
+        direction: 'in',
+        amount: booking.totalPrice,
+        method: 'paypal',
+        status: 'completed',
+        transactionId,
+        tourBookingId: booking._id,
+        details: {
+          businessUserId: tour?.providerId,
+          commission: 0,
+          completedAt: new Date()
+        }
+      });
+    }
+
+    console.log("✅ Thanh toán PayPal thành công");
+    return res.redirect(`${BASE_URL}/api/payment/payment-result?status=success`);
+
+  } catch (err) {
+    console.error("❌ capturePayPalPayment error:", err);
+    return res.redirect(`${BASE_URL}/api/payment/payment-result?status=fail`);
+  }
+};
+
+/**
+ * Trang kết quả thanh toán
+ */
+const paymentResultPage = (req, res) => {
+  const status = req.query.status;
+  res.send(`
+    <html>
+      <body>
+        <h2>Thanh toán ${status === 'success' ? 'THÀNH CÔNG' : 'THẤT BẠI'}!</h2>
+      </body>
+    </html>
+  `);
+};
+
 module.exports = {
-  handlePayOSWebhook,
   createPayPalOrder,
-  capturePayPalPayment
+  capturePayPalPayment,
+  paymentResultPage,
+handlePayOSWebhook
 };
